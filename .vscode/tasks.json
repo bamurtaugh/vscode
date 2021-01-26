@@ -62,7 +62,8 @@
 			"group": {
 				"kind": "build",
 				"isDefault": true
-			}
+			},
+			"problemMatcher": []
 		},
 		{
 			"type": "npm",
@@ -90,7 +91,8 @@
 				"Kill Build VS Code Core",
 				"Kill Build VS Code Extensions"
 			],
-			"group": "build"
+			"group": "build",
+			"problemMatcher": []
 		},
 		{
 			"type": "npm",
@@ -125,7 +127,7 @@
 			"label": "Kill Build Web Extensions",
 			"group": "build",
 			"presentation": {
-				"reveal": "never",
+				"reveal": "never"
 			},
 			"problemMatcher": "$tsc"
 		},
@@ -189,11 +191,25 @@
 		},
 		{
 			"type": "shell",
-			"command": "node build/lib/prelaunch.js",
+			"command": "node build/lib/preLaunch.js",
 			"label": "Ensure Prelaunch Dependencies",
 			"presentation": {
 				"reveal": "silent"
 			}
 		},
+		{
+			"type": "npm",
+			"script": "tsec-compile-check",
+			"problemMatcher": [
+				{
+					"base": "$tsc",
+					"applyTo": "allDocuments",
+					"owner": "tsec"
+				}
+			],
+			"group": "build",
+			"label": "npm: tsec-compile-check",
+			"detail": "node_modules/tsec/bin/tsec -p src/tsconfig.json --noEmit"
+		}
 	]
 }
