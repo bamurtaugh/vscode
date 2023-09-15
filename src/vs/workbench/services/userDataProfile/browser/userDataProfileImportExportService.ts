@@ -324,14 +324,15 @@ export class UserDataProfileImportExportService extends Disposable implements IU
 
 		let result: { name: string; items: ReadonlyArray<IQuickPickItem> } | undefined;
 		disposables.add(Event.any(quickPick.onDidCustom, quickPick.onDidAccept)(() => {
-			if (!quickPick.value) {
-				quickPick.validationMessage = localize('name required', "Provide a name for the new profile");
+			const name = quickPick.value.trim();
+			if (!name) {
+				quickPick.validationMessage = localize('name required', "Profile name is required and must be a non-empty value.");
 				quickPick.severity = Severity.Error;
 			}
 			if (quickPick.validationMessage) {
 				return;
 			}
-			result = { name: quickPick.value, items: quickPick.selectedItems };
+			result = { name, items: quickPick.selectedItems };
 			quickPick.hide();
 			quickPick.severity = Severity.Ignore;
 			quickPick.validationMessage = undefined;
@@ -481,7 +482,7 @@ export class UserDataProfileImportExportService extends Disposable implements IU
 				sticky: true,
 			}, async progress => {
 				const reportProgress = (message: string) => progress.report({ message: localize('create from profile', "Create Profile: {0}", message) });
-				const profile = await this.doCreateProfile(profileTemplate, false, false, { useDefaultFlags: this.userDataProfileService.currentProfile.useDefaultFlags }, reportProgress);
+				const profile = await this.doCreateProfile(profileTemplate, false, false, { useDefaultFlags: options?.useDefaultFlags }, reportProgress);
 				if (profile) {
 					reportProgress(localize('progress extensions', "Applying Extensions..."));
 					await this.instantiationService.createInstance(ExtensionsResource).copy(this.userDataProfileService.currentProfile, profile, false);
@@ -648,12 +649,12 @@ export class UserDataProfileImportExportService extends Disposable implements IU
 					return that.progressService.withProgress({
 						location: IMPORT_PROFILE_PREVIEW_VIEW,
 					}, async progress => {
-						disposable.dispose();
 						view.setMessage(undefined);
 						const profileTemplate = await userDataProfileImportState.getProfileTemplateToImport();
 						if (profileTemplate.extensions) {
 							await that.instantiationService.createInstance(ExtensionsResource).apply(profileTemplate.extensions, importedProfile);
 						}
+						disposable.dispose();
 					});
 				}
 			}));
@@ -1228,7 +1229,7 @@ abstract class UserDataProfileImportExportState extends Disposable implements IT
 
 	private isSelected(treeItem: IProfileResourceTreeItem): boolean {
 		if (treeItem.checkbox) {
-			return treeItem.checkbox.isChecked || !!treeItem.children?.some(child => child.checkbox?.isChecked ?? true);
+			return treeItem.checkbox.isChecked || !!treeItem.children?.some(child => child.checkbox?.isChecked);
 		}
 		return true;
 	}

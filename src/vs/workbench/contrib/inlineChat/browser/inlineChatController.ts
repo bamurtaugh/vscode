@@ -38,6 +38,8 @@ import { Lazy } from 'vs/base/common/lazy';
 import { Progress } from 'vs/platform/progress/common/progress';
 import { generateUuid } from 'vs/base/common/uuid';
 import { TextEdit } from 'vs/editor/common/languages';
+import { ISelection } from 'vs/editor/common/core/selection';
+import { onUnexpectedError } from 'vs/base/common/errors';
 
 export const enum State {
 	CREATE_SESSION = 'CREATE_SESSION',
@@ -63,6 +65,7 @@ const enum Message {
 }
 
 export interface InlineChatRunOptions {
+	initialSelection?: ISelection;
 	initialRange?: IRange;
 	message?: string;
 	autoSend?: boolean;
@@ -98,7 +101,10 @@ export class InlineChatController implements IEditorContribution {
 
 	private _messages = this._store.add(new Emitter<Message>());
 
-	private readonly _sessionStore: DisposableStore = new DisposableStore();
+	readonly onDidAcceptInput = Event.filter(this._messages.event, m => m === Message.ACCEPT_INPUT, this._store);
+	readonly onDidCancelInput = Event.filter(this._messages.event, m => m === Message.CANCEL_INPUT || m === Message.CANCEL_SESSION, this._store);
+
+	private readonly _sessionStore: DisposableStore = this._store.add(new DisposableStore());
 	private readonly _stashedSession: MutableDisposable<StashedSession> = this._store.add(new MutableDisposable());
 	private _activeSession?: Session;
 	private _strategy?: EditModeStrategy;
@@ -137,15 +143,18 @@ export class InlineChatController implements IEditorContribution {
 			}
 
 			this._log('session RESUMING', e);
-			await this._nextState(State.CREATE_SESSION, { existingSession });
+			await this.run({ existingSession });
 			this._log('session done or paused');
 		}));
 		this._log('NEW controller');
 	}
 
 	dispose(): void {
+		this._strategy?.dispose();
 		this._stashedSession.clear();
-		this.finishExistingSession();
+		if (this._activeSession) {
+			this._inlineChatSessionService.releaseSession(this._activeSession);
+		}
 		this._store.dispose();
 		this._log('controller disposed');
 	}
@@ -183,14 +192,29 @@ export class InlineChatController implements IEditorContribution {
 	private _currentRun?: Promise<void>;
 
 	async run(options: InlineChatRunOptions | undefined = {}): Promise<void> {
-		this.finishExistingSession();
-		if (this._currentRun) {
+		try {
+			this.finishExistingSession();
+			if (this._currentRun) {
+				await this._currentRun;
+			}
+			this._stashedSession.clear();
+			if (options.initialSelection) {
+				this._editor.setSelection(options.initialSelection);
+			}
+			this._currentRun = this._nextState(State.CREATE_SESSION, options);
 			await this._currentRun;
+
+		} catch (error) {
+			// this should not happen but when it does make sure to tear down the UI and everything
+			onUnexpectedError(error);
+			if (this._activeSession) {
+				this._inlineChatSessionService.releaseSession(this._activeSession);
+			}
+			this[State.PAUSE]();
+
+		} finally {
+			this._currentRun = undefined;
 		}
-		this._stashedSession.clear();
-		this._currentRun = this._nextState(State.CREATE_SESSION, options);
-		await this._currentRun;
-		this._currentRun = undefined;
 	}
 
 	// ---- state machine
@@ -311,7 +335,7 @@ export class InlineChatController implements IEditorContribution {
 		this._zone.value.widget.updateInfo(this._activeSession.session.message ?? localize('welcome.1', "AI-generated code may be incorrect"));
 		this._zone.value.widget.preferredExpansionState = this._activeSession.lastExpansionState;
 		this._zone.value.widget.value = this._activeSession.lastInput?.value ?? this._zone.value.widget.value;
-		this._zone.value.widget.onDidChangeInput(_ => {
+		this._sessionStore.add(this._zone.value.widget.onDidChangeInput(_ => {
 			const start = this._zone.value.position;
 			if (!start || !this._zone.value.widget.hasFocus() || !this._zone.value.widget.value || !this._editor.hasModel()) {
 				return;
@@ -322,7 +346,7 @@ export class InlineChatController implements IEditorContribution {
 				return;
 			}
 			this._editor.revealLine(nextLine, ScrollType.Smooth);
-		});
+		}));
 
 		this._showWidget(true, options.position);
 
@@ -389,8 +413,7 @@ export class InlineChatController implements IEditorContribution {
 		this._zone.value.widget.placeholder = this._getPlaceholderText();
 
 		if (options.message) {
-			this._zone.value.widget.value = options.message;
-			this._zone.value.widget.selectAll();
+			this.updateInput(options.message);
 			aria.alert(options.message);
 			delete options.message;
 		}
@@ -411,7 +434,7 @@ export class InlineChatController implements IEditorContribution {
 			msgListener.dispose();
 		}
 
-		this._zone.value.widget.selectAll();
+		this._zone.value.widget.selectAll(false);
 
 		if (message & (Message.CANCEL_INPUT | Message.CANCEL_SESSION)) {
 			return State.CANCEL;
@@ -535,6 +558,7 @@ export class InlineChatController implements IEditorContribution {
 			this._ctxHasActiveRequest.set(false);
 			this._zone.value.widget.updateProgress(false);
 			this._zone.value.widget.updateInfo('');
+			this._zone.value.widget.updateToolbar(true);
 			this._log('request took', sw.elapsed(), this._activeSession.provider.debugName);
 
 		}
@@ -752,6 +776,11 @@ export class InlineChatController implements IEditorContribution {
 		this._messages.fire(Message.ACCEPT_INPUT);
 	}
 
+	updateInput(text: string): void {
+		this._zone.value.widget.value = text;
+		this._zone.value.widget.selectAll();
+	}
+
 	regenerate(): void {
 		this._messages.fire(Message.RERUN_INPUT);
 	}
@@ -772,6 +801,10 @@ export class InlineChatController implements IEditorContribution {
 
 	focus(): void {
 		this._zone.value.widget.focus();
+	}
+
+	hasFocus(): boolean {
+		return this._zone.value.widget.hasFocus();
 	}
 
 	populateHistory(up: boolean) {
