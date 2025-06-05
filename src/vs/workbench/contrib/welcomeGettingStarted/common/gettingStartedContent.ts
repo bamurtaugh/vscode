@@ -437,6 +437,15 @@ export const walkthroughs: GettingStartedWalkthroughContent = [
 					media: {
 						type: 'svg', altText: 'Go to file in quick search.', path: 'search.svg'
 					}
+				},
+				{
+					id: 'remoteComputeWeb',
+					title: localize('gettingStarted.remoteCompute.title', "Remote Compute"),
+					description: localize('gettingStarted.remoteCompute.description', "Hello world! You're connected to a remote environment for enhanced computing capabilities."),
+					when: 'isWeb && remoteName',
+					media: {
+						type: 'svg', altText: 'Remote compute connection', path: 'terminal.svg'
+					}
 				}
 			]
 		}
